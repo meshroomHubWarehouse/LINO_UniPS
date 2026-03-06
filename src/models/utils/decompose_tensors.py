@@ -11,10 +11,12 @@ import math
 
 def divide_tensor_spatial(x, block_size=256, method='tile_stride'):
     assert x.dim() == 4, "Input tensor must have 4 dimensions [B, C, H, W]"
-    B, C, H, W = x.shape    
+    B, C, H, W = x.shape
     assert H == W, "Height and Width must be equal"
     assert H % block_size == 0 and W % block_size ==0, "The tensor size cannot be divided by the block size"
     mosaic_scale = H // block_size
+
+    print(f"Using block_size: {block_size} (mosaic_scale: {mosaic_scale})")
     
     if method == 'tile_stride':
         """ decomposing x into K x K of (Hc, Wc) non-overlapped blocks (grid)"""           
@@ -80,3 +82,48 @@ def merge_overlappnig_patches(patches, patch_size, margin, original_size):
     output = output / weight
     return output
 
+# def divide_tensor_spatial(x, block_size=256, method='tile_stride') -> tuple:
+#     assert x.dim() == 4, "Input tensor must have 4 dimensions [B, C, H, W]"
+#     B, C, H, W = x.shape
+#     assert H == W, "Height and Width must be equal"
+    
+#     # Find the largest divisor of H that's <= block_size
+#     actual_block_size = block_size
+#     while actual_block_size > 1 and H % actual_block_size != 0:
+#         actual_block_size -= 1
+    
+#     # If no suitable divisor found, find the closest divisor
+#     if actual_block_size == 1:
+#         # Find all divisors of H
+#         divisors = []
+#         for i in range(1, int(H**0.5) + 1):
+#             if H % i == 0:
+#                 divisors.append(i)
+#                 if i != H // i:
+#                     divisors.append(H // i)
+        
+#         # Choose the divisor closest to the desired block_size
+#         divisors.sort()
+#         actual_block_size = min(divisors, key=lambda x: abs(x - block_size))
+    
+#     print(f"Using block_size: {actual_block_size} (mosaic_scale: {H // actual_block_size})")
+    
+#     mosaic_scale = H // actual_block_size
+    
+#     if method == 'tile_stride':
+#         """ decomposing x into K x K of (Hc, Wc) non-overlapped blocks (grid)"""           
+        
+#         K = mosaic_scale * mosaic_scale
+#         fold_params_grid = dict(kernel_size=(mosaic_scale, mosaic_scale), stride=(mosaic_scale, mosaic_scale), padding=(0,0), dilation=(1,1))
+#         unfold_grid = nn.Unfold(**fold_params_grid)   
+#         tensor_grids = unfold_grid(x) # (B, C * K, Hm * Hm)
+#         tensor_grids = tensor_grids.reshape(B, C, K, actual_block_size, actual_block_size).permute(0, 2, 1, 3, 4) # (B, K, C, Hm, Hm)
+#         return tensor_grids, actual_block_size
+    
+#     if method == 'tile_block':    
+#         tensor_blocks = x.view(B, C, mosaic_scale, actual_block_size, mosaic_scale, actual_block_size)
+#         tensor_blocks = tensor_blocks.permute(0, 2, 4, 1, 3, 5) # (B, mc, mc, C, Hm, Wm)
+#         tensor_blocks = tensor_blocks.contiguous().view(B, mosaic_scale**2, C, actual_block_size, actual_block_size) ## (B, K, C, Hm, Hm)
+#         return tensor_blocks, actual_block_size
+    
+#     return -1, actual_block_size

@@ -3,11 +3,11 @@ import pytorch_lightning as pl
 from pytorch_lightning import seed_everything 
 import argparse
 import torch
+
 def predict_normal():
     test_loader = DataLoader(testdata, batch_size=1)
     trainer = pl.Trainer(accelerator="auto", devices=1,precision="bf16-mixed")
     trainer.test(model=lino, dataloaders=test_loader)
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -38,16 +38,22 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     seed_everything(seed=args.seed, workers=True)
-    lino = torch.hub.load(
-            "houyuanchen111/LINO_UniPS",
-            "lino_unips",
-            pretrained=True,
-            task_name=args.task_name 
-        )
-    testdata = torch.hub.load(
-            "houyuanchen111/LINO_UniPS",
-            "load_test_data",
-            data_root=[args.data_root],
-            numofimages=args.num_images
-        )
+    # lino = torch.hub.load(
+    #         "houyuanchen111/LINO_UniPS",
+    #         "lino_unips",
+    #         pretrained=True,
+    #         task_name=args.task_name
+    #     )
+    from hubconf import lino_unips  # Adjust import path
+    lino = lino_unips(pretrained=True, task_name=args.task_name)
+
+    # testdata = torch.hub.load(
+    #         "houyuanchen111/LINO_UniPS",
+    #         "load_test_data",
+    #         data_root=[args.data_root],
+    #         numofimages=args.num_images,
+    #         force_reload=True
+    #     )
+    from hubconf import load_test_data  # Adjust import path
+    testdata = load_test_data(data_root=[args.data_root], numofimages=args.num_images)
     predict_normal()

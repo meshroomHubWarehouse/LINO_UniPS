@@ -130,14 +130,15 @@ class TestData(Dataset):
         if isinstance(self.data_root, str):
             self.data_root = [self.data_root]
         for i in range(len(self.data_root)):
-             with os.scandir(self.data_root[i]) as entries:
+            with os.scandir(self.data_root[i]) as entries:
                 self.objlist += [entry.path for entry in entries if entry.is_dir()]
-             print(f"[Dataset]  => {len(self.objlist)} items selected.")
+        print(f"[Dataset]  => {len(self.objlist)} items selected.")
         objlist = self.objlist
         total = len(objlist)
         indices = list(range(total))
         self.objlist = [objlist[i] for i in indices]
         print(f"Test, => {len(self.objlist)} items selected.")
+
     def load(self, objlist, dirid):
         obj_path = objlist[dirid]
         if "DiLiGenT" in obj_path:
@@ -182,6 +183,10 @@ class TestData(Dataset):
         N = None
         n_true = None
         
+        print(f"Loading object: {obj_path} with {len(indexset)} images.")
+        print(indexset)
+        print(directlist)
+        
         for i, indexofimage in enumerate(indexset):
             img_path = directlist[indexofimage]
             read_img = cv2.imread(img_path, flags=cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)
@@ -214,10 +219,10 @@ class TestData(Dataset):
 
 
                 self.roi = get_roi(mask)
-                mask = crop_and_resize_mask(mask, self.roi)
+                mask = crop_and_resize_mask(mask, self.roi, max_image_resolution=6000)
               
                 
-            img= crop_and_resize_img(img, self.roi)
+            img= crop_and_resize_img(img, self.roi, max_image_resolution=6000)
             h, w = img.shape[:2]
             if i == 0:
                 I = np.zeros((len(indexset), h, w, 3), np.float32)

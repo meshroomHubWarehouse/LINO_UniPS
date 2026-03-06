@@ -174,6 +174,10 @@ class LiNo_UniPS(pl.LightningModule):
         B, C, H, W, Nmax = I.shape
 
         patch_size = 512               
+        # patches_I, actual_patch_size = decompose_tensors.divide_tensor_spatial(I.permute(0,4,1,2,3).reshape(-1, C, H, W), block_size=patch_size, method='tile_stride')
+        # patches_I = patches_I.reshape(B, Nmax, -1, C, actual_patch_size, actual_patch_size).permute(0, 2, 3, 4, 5, 1)
+        # sliding_blocks = patches_I.shape[1]
+        # patches_M, _ = decompose_tensors.divide_tensor_spatial(M, block_size=actual_patch_size, method='tile_stride')
         patches_I = decompose_tensors.divide_tensor_spatial(I.permute(0,4,1,2,3).reshape(-1, C, H, W), block_size=patch_size, method='tile_stride')
         patches_I = patches_I.reshape(B, Nmax, -1, C, patch_size, patch_size).permute(0, 2, 3, 4, 5, 1)
         sliding_blocks = patches_I.shape[1]
@@ -254,4 +258,3 @@ class LiNo_UniPS(pl.LightningModule):
 
     def forward(self, batch):
         return self.predict_step(batch=batch)
-        
