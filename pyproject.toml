@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lino-unips"
+version = "1.0.0"
+description = "LINO: UniPS photometric stereo"
+requires-python = ">=3.10"
+
+dependencies = [
+    "torch>=2.4.0",
+    "torchvision>=0.19.0",
+    "torchmetrics",
+    "pytorch_lightning",
+    "einops",
+    "kornia",
+    "PyWavelets",
+    "scipy",
+    "matplotlib",
+    "numpy",
+    "opencv-python-headless",
+    "Pillow",
+    "scikit-image",
+    "scikit-learn",
+    "omegaconf",
+    "hydra-core",
+    "transformers",
+    "diffusers",
+    "safetensors",
+    "trimesh",
+    "rich",
+    "tqdm",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.setuptools]
+zip-safe = false
+py-modules = ["inference_sfm", "hubconf"]
