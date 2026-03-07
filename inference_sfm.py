@@ -24,10 +24,32 @@ from pytorch_lightning import seed_everything
 logger = logging.getLogger(__name__)
 
 
-def load_sfm_json(sfm_path):
-    """Load and parse an AliceVision SfMData JSON file."""
+def load_sfm(sfm_path):
+    """Load SfMData — try pyalicevision first (supports .sfm, .abc, .json),
+    fallback to json.load.  Uses sfmDataIO.save() to a temp JSON so ALL
+    fields (version, intrinsics, metadata, surveys…) are preserved."""
+    try:
+        from pyalicevision import sfmData as avSfmData, sfmDataIO
+        import tempfile
+        data = avSfmData.SfMData()
+        if sfmDataIO.load(data, sfm_path, sfmDataIO.ALL):
+            logger.info("Loaded SfMData via pyalicevision: %s", sfm_path)
+            with tempfile.NamedTemporaryFile(suffix=".sfm", delete=False) as tmp:
+                tmp_path = tmp.name
+            try:
+                sfmDataIO.save(data, tmp_path, sfmDataIO.ALL)
+                with open(tmp_path, "r") as f:
+                    return json.load(f)
+            finally:
+                os.unlink(tmp_path)
+        logger.warning("pyalicevision failed to load %s, falling back to JSON", sfm_path)
+    except ImportError:
+        logger.info("pyalicevision not available, using JSON loader")
     with open(sfm_path, "r") as f:
         return json.load(f)
+
+
+load_sfm_json = load_sfm  # backward compat
 
 
 def group_views_by_pose(sfm_data):
@@ -43,23 +65,61 @@ def group_views_by_pose(sfm_data):
     return groups
 
 
-def find_mask_for_pose(pose_id, mask_folder, view_ids=None):
+def extract_alpha_mask(views):
+    """Extract mask by ANDing all alpha channels from the pose's images.
+
+    Images with all-white alpha are skipped. The result is the intersection
+    of all non-trivial alpha masks, keeping only the object area.
+
+    Returns a PIL Image (RGB) or None.
+    """
+    import numpy as np
+    combined = None
+    count = 0
+    for v in views:
+        path = v.get("path", "")
+        if not path or not os.path.isfile(path):
+            continue
+        img = Image.open(path)
+        if img.mode not in ("RGBA", "LA", "PA"):
+            continue
+        alpha = np.array(img.split()[-1])
+        # Skip all-white (trivial) alpha channels
+        if alpha.min() > 250:
+            continue
+        mask = (alpha > 0).astype(np.uint8)
+        if combined is None:
+            combined = mask
+        else:
+            combined = combined * mask  # logical AND
+        count += 1
+    if combined is None:
+        return None
+    logger.info("Extracted alpha mask from %d images (AND)", count)
+    combined_255 = (combined * 255).astype(np.uint8)
+    mask_pil = Image.fromarray(combined_255)
+    return Image.merge("RGB", (mask_pil, mask_pil, mask_pil))
+
+
+def find_mask_for_pose(pose_id, mask_folder, view_ids=None, views=None):
     """Find a mask image for a given pose.
 
-    Search order: {pose_id}.png, {viewId}.png, mask.png
+    Search order: {pose_id}.png, {viewId}.png, mask.png, alpha channel
     Returns a PIL Image or None.
     """
-    if not mask_folder or not os.path.isdir(mask_folder):
-        return None
+    if mask_folder and os.path.isdir(mask_folder):
+        for candidate_id in [pose_id] + (view_ids or []):
+            path = os.path.join(mask_folder, f"{candidate_id}.png")
+            if os.path.isfile(path):
+                return Image.open(path).convert("RGB")
 
-    for candidate_id in [pose_id] + (view_ids or []):
-        path = os.path.join(mask_folder, f"{candidate_id}.png")
+        path = os.path.join(mask_folder, "mask.png")
         if os.path.isfile(path):
             return Image.open(path).convert("RGB")
 
-    path = os.path.join(mask_folder, "mask.png")
-    if os.path.isfile(path):
-        return Image.open(path).convert("RGB")
+    # Fallback: extract from alpha channel
+    if views:
+        return extract_alpha_mask(views)
 
     return None
 
@@ -106,6 +166,7 @@ def load_images_for_pose(views, nb_img=-1, downscale=1):
 
 
 def run_sfm_inference(sfm_path, output_folder, mask_folder=None,
+                      mask_output_folder=None,
                       nb_img=-1, downscale=1, use_cuda=True,
                       task_name="Real", weights_path=None, seed=42):
     """Run LINO_UniPS inference on all poses in an SfM JSON file.
@@ -128,7 +189,7 @@ def run_sfm_inference(sfm_path, output_folder, mask_folder=None,
     seed_everything(seed=seed, workers=True)
 
     # Load SfM data
-    sfm_data = load_sfm_json(sfm_path)
+    sfm_data = load_sfm(sfm_path)
     pose_groups = group_views_by_pose(sfm_data)
     logger.info(f"Loaded {len(sfm_data.get('views', []))} views, "
                 f"{len(pose_groups)} poses")
@@ -165,7 +226,25 @@ def run_sfm_inference(sfm_path, output_folder, mask_folder=None,
 
             # Load mask
             view_ids = [str(v["viewId"]) for v in views]
-            mask_img = find_mask_for_pose(pose_id, mask_folder, view_ids)
+            mask_img = find_mask_for_pose(pose_id, mask_folder, view_ids, views=views)
+
+            # Save extracted mask if output folder is set
+            if mask_img is not None and mask_output_folder and not mask_folder:
+                os.makedirs(mask_output_folder, exist_ok=True)
+                mask_path = os.path.join(mask_output_folder, f"{pose_id}.png")
+                mask_img.save(mask_path)
+                logger.info("Saved mask to %s", mask_path)
+
+            # Resize mask to match (downscaled) image dimensions
+            if mask_img is not None and imgs_list:
+                img_h, img_w = imgs_list[0][0].shape[:2]
+                mask_w, mask_h = mask_img.size  # PIL: (width, height)
+                if mask_h != img_h or mask_w != img_w:
+                    logger.info("Resizing mask from %dx%d to %dx%d "
+                                "to match images",
+                                mask_w, mask_h, img_w, img_h)
+                    mask_img = mask_img.resize(
+                        (img_w, img_h), Image.NEAREST)
 
             # Run prediction via the Predictor API
             result = predictor.predict(imgs_list, mask_img)
@@ -212,19 +291,8 @@ def run_sfm_inference(sfm_path, output_folder, mask_folder=None,
     total_time = time.time() - total_start
     logger.info(f"All poses processed in {total_time:.1f}s")
 
-    # Write output JSON
-    output_json = {
-        "inputSfm": os.path.abspath(sfm_path),
-        "downscale": downscale,
-        "taskName": task_name,
-        "poses": results,
-    }
-    out_json_path = os.path.join(output_folder, "normals.json")
-    with open(out_json_path, "w") as f:
-        json.dump(output_json, f, indent=2)
-
-    logger.info(f"Output JSON: {out_json_path}")
-    return out_json_path
+    logger.info(f"Inference complete: {len(results)} poses processed")
+    return results
 
 
 def main():
