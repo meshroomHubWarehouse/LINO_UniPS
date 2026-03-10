@@ -228,13 +228,6 @@ def run_sfm_inference(sfm_path, output_folder, mask_folder=None,
             view_ids = [str(v["viewId"]) for v in views]
             mask_img = find_mask_for_pose(pose_id, mask_folder, view_ids, views=views)
 
-            # Save extracted mask if output folder is set
-            if mask_img is not None and mask_output_folder and not mask_folder:
-                os.makedirs(mask_output_folder, exist_ok=True)
-                mask_path = os.path.join(mask_output_folder, f"{pose_id}.png")
-                mask_img.save(mask_path)
-                logger.info("Saved mask to %s", mask_path)
-
             # Resize mask to match (downscaled) image dimensions
             if mask_img is not None and imgs_list:
                 img_h, img_w = imgs_list[0][0].shape[:2]
@@ -245,6 +238,13 @@ def run_sfm_inference(sfm_path, output_folder, mask_folder=None,
                                 mask_w, mask_h, img_w, img_h)
                     mask_img = mask_img.resize(
                         (img_w, img_h), Image.NEAREST)
+
+            # Save extracted mask at output resolution (after resize)
+            if mask_img is not None and mask_output_folder and not mask_folder:
+                os.makedirs(mask_output_folder, exist_ok=True)
+                mask_path = os.path.join(mask_output_folder, f"{pose_id}.png")
+                mask_img.save(mask_path)
+                logger.info("Saved mask to %s", mask_path)
 
             # Run prediction via the Predictor API
             result = predictor.predict(imgs_list, mask_img)
