@@ -15,6 +15,8 @@ import logging
 import os
 import time
 
+os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
+
 import cv2
 import numpy as np
 import torch
@@ -49,8 +51,6 @@ def load_sfm(sfm_path):
         return json.load(f)
 
 
-load_sfm_json = load_sfm  # backward compat
-
 
 def group_views_by_pose(sfm_data):
     """Group views by poseId.
@@ -65,11 +65,55 @@ def group_views_by_pose(sfm_data):
     return groups
 
 
+def _extract_interior_mask(mask_uint8):
+    """Extract interior (object) region from a binary mask, removing
+    border-connected white regions (undistortion validity corners).
+
+    Uses connected components on the mask and keeps only components that
+    do NOT touch any image edge.  Returns None if all components touch
+    the border (no interior object found).
+
+    Args:
+        mask_uint8: binary mask (0 or 1), uint8, shape (H, W)
+
+    Returns:
+        cleaned mask (0 or 1), uint8, same shape.  None if no interior
+        object mask found.
+    """
+    h, w = mask_uint8.shape
+    mask_255 = (mask_uint8 * 255).astype(np.uint8) if mask_uint8.max() <= 1 \
+        else mask_uint8.copy()
+
+    num_labels, labels = cv2.connectedComponents(mask_255)
+    result = np.zeros((h, w), dtype=np.uint8)
+
+    for label_id in range(1, num_labels):
+        component = (labels == label_id)
+        touches_border = (
+            np.any(component[0, :]) or np.any(component[-1, :]) or
+            np.any(component[:, 0]) or np.any(component[:, -1])
+        )
+        if not touches_border:
+            result[component] = 1
+            logger.info("Keeping interior alpha component (label %d, "
+                        "%d px)", label_id, int(component.sum()))
+        else:
+            logger.info("Removing border-touching alpha component (label %d, "
+                        "%d px)", label_id, int(component.sum()))
+
+    if result.max() == 0:
+        logger.info("All alpha components touch border — no interior object")
+        return None
+
+    return result
+
+
 def extract_alpha_mask(views):
     """Extract mask by ANDing all alpha channels from the pose's images.
 
-    Images with all-white alpha are skipped. The result is the intersection
-    of all non-trivial alpha masks, keeping only the object area.
+    Images with all-white alpha are skipped.  For each image, border-connected
+    white regions (undistortion validity) are removed, keeping only interior
+    object regions.
 
     Returns a PIL Image (RGB) or None.
     """
@@ -87,11 +131,17 @@ def extract_alpha_mask(views):
         # Skip all-white (trivial) alpha channels
         if alpha.min() > 250:
             continue
-        mask = (alpha > 0).astype(np.uint8)
+        mask = (alpha > 127).astype(np.uint8)
+        # Remove border-connected regions (undistortion validity)
+        cleaned = _extract_interior_mask(mask)
+        if cleaned is None:
+            logger.info("Skipping alpha from %s: no interior object mask",
+                        os.path.basename(path))
+            continue
         if combined is None:
-            combined = mask
+            combined = cleaned
         else:
-            combined = combined * mask  # logical AND
+            combined = combined * cleaned  # logical AND
         count += 1
     if combined is None:
         return None
@@ -165,10 +215,16 @@ def load_images_for_pose(views, nb_img=-1, downscale=1):
     return imgs_list
 
 
+def save_normal_exr(normal, out_path):
+    """Save normal map as float32 EXR (raw [-1,1] values, BGR for cv2)."""
+    cv2.imwrite(out_path, normal[:, :, ::-1].astype(np.float32))
+
+
 def run_sfm_inference(sfm_path, output_folder, mask_folder=None,
                       mask_output_folder=None,
                       nb_img=-1, downscale=1, use_cuda=True,
-                      task_name="Real", weights_path=None, seed=42):
+                      task_name="Real", weights_path=None, seed=42,
+                      output_format="png16"):
     """Run LINO_UniPS inference on all poses in an SfM JSON file.
 
     Args:
@@ -239,7 +295,22 @@ def run_sfm_inference(sfm_path, output_folder, mask_folder=None,
                     mask_img = mask_img.resize(
                         (img_w, img_h), Image.NEAREST)
 
-            # Save extracted mask at output resolution (after resize)
+            # LINO's network crops inputs to dimensions divisible by 32 internally,
+            # but applies the mask at the uncropped size -> broadcast mismatch.
+            # Pre-crop images AND mask to floor(dim/32)*32 BEFORE saving the mask, so the
+            # normals AND the saved mask (used downstream by RNbNeuS2) stay the same size.
+            if imgs_list:
+                ih, iw = imgs_list[0][0].shape[:2]
+                H32, W32 = (ih // 32) * 32, (iw // 32) * 32
+                if (H32, W32) != (ih, iw):
+                    imgs_list = [(im[:H32, :W32], n) for (im, n) in imgs_list]
+                    if mask_img is not None:
+                        mw, mh = mask_img.size
+                        if (mh, mw) != (ih, iw):
+                            mask_img = mask_img.resize((iw, ih), Image.NEAREST)
+                        mask_img = mask_img.crop((0, 0, W32, H32))
+
+            # Save extracted mask at output resolution (after /32 crop)
             if mask_img is not None and mask_output_folder and not mask_folder:
                 os.makedirs(mask_output_folder, exist_ok=True)
                 mask_path = os.path.join(mask_output_folder, f"{pose_id}.png")
@@ -261,10 +332,15 @@ def run_sfm_inference(sfm_path, output_folder, mask_folder=None,
             if normal.shape[0] == 3 and normal.ndim == 3:
                 normal = np.transpose(normal, (1, 2, 0))
 
-            # Save as 16-bit PNG
-            normal_rgb = (((normal + 1) / 2) * 65535).astype(np.uint16)
-            out_path = os.path.join(output_folder, f"{pose_id}.png")
-            cv2.imwrite(out_path, normal_rgb[:, :, ::-1])
+            # Save output
+            ext = ".exr" if output_format == "exr" else ".png"
+            out_path = os.path.join(output_folder, f"{pose_id}{ext}")
+            if output_format == "exr":
+                save_normal_exr(normal, out_path)
+            else:
+                normal_rgb = (((normal + 1) / 2) * 65535).astype(np.uint16)
+                cv2.imwrite(out_path, normal_rgb[:, :, ::-1],
+                            [cv2.IMWRITE_PNG_COMPRESSION, 0])
 
             pose_time = time.time() - pose_start
             logger.info(f"Pose {pose_id}: {normal.shape}, "
@@ -315,6 +391,10 @@ def main():
                         help="Task name for model config")
     parser.add_argument("--weights", default=None,
                         help="Path to local .pth weights file")
+    parser.add_argument("--output-format", default="png16",
+                        choices=["png16", "exr"],
+                        help="Output format: png16 (16-bit PNG) or "
+                             "exr (float32 EXR) (default: png16)")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
@@ -334,6 +414,7 @@ def main():
         task_name=args.task_name,
         weights_path=args.weights,
         seed=args.seed,
+        output_format=args.output_format,
     )
 
 
