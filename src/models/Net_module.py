@@ -227,10 +227,16 @@ class LiNo_UniPS(pl.LightningModule):
             glc,_= self.image_encoder(data, nImgArray, canonical_resolution)
             I_dec = []
             M_dec = []
-            img = I.permute(0, 4, 1, 2, 3)            
+            img = I.permute(0, 4, 1, 2, 3)
             """ Sample Decoder at Original Resokution"""
-            img = img.squeeze()
-            I_dec = F.interpolate(img.float(), size=(decoder_resolution, decoder_resolution), mode='bilinear', align_corners=False).to(torch.bfloat16) 
+            # BUG (amont) : img.squeeze() sans argument supprimait AUSSI la dimension
+            # "nombre d'images" quand elle vaut 1, donc F.interpolate recevait un
+            # tenseur 3D et levait ValueError. Consequence : LINO-UniPS ne pouvait
+            # pas tourner avec UNE SEULE image d'entree. On aplatit explicitement
+            # (B, Nmax, C, H, W) -> (B*Nmax, C, H, W), ce qui est identique au
+            # comportement d'origine des que B == 1 et Nmax > 1.
+            img = img.reshape(B * Nmax, C, H, W)
+            I_dec = F.interpolate(img.float(), size=(decoder_resolution, decoder_resolution), mode='bilinear', align_corners=False).to(torch.bfloat16)
             M_dec = F.interpolate(M.float(), size=(decoder_resolution, decoder_resolution), mode='nearest').to(torch.bfloat16)
             decoder_imgsize = (decoder_resolution, decoder_resolution)
             C = img.shape[1]
