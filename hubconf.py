@@ -7,21 +7,18 @@ from src.data import TestData
 from src.data import DemoData
 dependencies = ['torch', 'pytorch_lightning', 'numpy']
 
-DEFAULT_MODEL_URL = os.getenv("LINO_MODEL_URL", "")  
+DEFAULT_MODEL_URL = os.getenv(
+    "LINO_MODEL_URL",
+    "https://huggingface.co/houyuanchen/lino/resolve/main/lino.pth",
+)
 
-def lino_unips(pretrained=True, task_name="DiLiGenT", **kwargs):
+def lino_unips(pretrained=True, task_name="DiLiGenT", ckpt_path: Optional[str] = None, **kwargs):
     model = LiNo_UniPS(task_name=task_name, **kwargs)
     if pretrained:
-        try:
-            state_dict = torch.hub.load_state_dict_from_url(
-                DEFAULT_MODEL_URL,
-                progress=True
-            )
-            model.load_state_dict(state_dict)
-            model.eval()
-            print("load lino_unips successfully")
-        except Exception as e:
-            print(f"error{e}")
+        state_dict = _load_state_dict(ckpt_path)
+        model.load_state_dict(state_dict, strict=False)
+        model.eval()
+        print("load lino_unips successfully")
             
     return model
 
@@ -50,7 +47,9 @@ def LINO(local_file_path: Optional[str] = None,task_name="DiLiGenT", **kwargs):
 
 
 def _load_state_dict(local_file_path: Optional[str] = None):
-    if local_file_path is not None and os.path.exists(local_file_path):
+    if local_file_path is not None:
+        if not os.path.exists(local_file_path):
+            raise FileNotFoundError(f"Checkpoint file not found: {local_file_path}")
         # Load state_dict from local file
         state_dict = torch.load(local_file_path, weights_only=False, map_location=torch.device("cpu"))
     else:
@@ -58,7 +57,7 @@ def _load_state_dict(local_file_path: Optional[str] = None):
             raise ValueError("LINO_MODEL_URL environment variable is not set; please provide a local_file_path or set LINO_MODEL_URL.")
         state_dict = torch.hub.load_state_dict_from_url(DEFAULT_MODEL_URL, progress=True, map_location=torch.device("cpu"))
 
-    return state_dict
+    return state_dict.get("state_dict", state_dict) if isinstance(state_dict, dict) else state_dict
 
 
 class Predictor:
