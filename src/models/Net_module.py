@@ -1,3 +1,9 @@
+import os
+
+# cv2 doit pouvoir ECRIRE des EXR : le codec OpenEXR est desactive par defaut
+# dans les roues opencv-python recentes. Doit etre pose AVANT l'import de cv2.
+os.environ.setdefault("OPENCV_IO_ENABLE_OPENEXR", "1")
+
 import torchvision
 import torch
 from torchmetrics import MeanMetric
@@ -12,6 +18,18 @@ import cv2
 import pytorch_lightning as pl
 from src.models.utils.compute_mae import compute_mae_np
 from datetime import datetime
+
+def save_normal_exr(path, nml):
+    """Ecrit une carte de normales (H, W, 3) en EXR float32.
+
+    Le depot d'origine n'ecrivait qu'un PNG 8 bits via plt.imsave, donc une
+    normale quantifiee sur 256 niveaux par axe : inutilisable comme entree de
+    SuperNormal, qui lit des .exr flottants.
+    """
+    arr = np.ascontiguousarray(np.float32(nml)[:, :, ::-1])   # RGB -> BGR
+    if not cv2.imwrite(path, arr):
+        raise RuntimeError(f"echec ecriture EXR {path} (OPENCV_IO_ENABLE_OPENEXR ?)")
+
 
 class LiNo_UniPS(pl.LightningModule):
     def __init__(self, 
@@ -88,6 +106,10 @@ class LiNo_UniPS(pl.LightningModule):
         save_path = os.path.join(save_dir,f'{self.numberofImages}',f'{obj_name}')
         os.makedirs(save_path, exist_ok=True)
         print(f"save to: {save_path}")
+        with open(os.path.join(save_path, 'images_used.txt'), 'w') as _fh:
+            _names = [os.path.basename(d[0]) for d in directlist]
+            _fh.write(f'# n_images_used={len(_names)}\n')
+            _fh.write('\n'.join(_names) + '\n')
         if ("DiLiGenT_100" not in self.task_name) and ("Real" not in self.task_name):
             nout_to_save = (nout + 1) / 2
             nml_gt_to_save = (nml_gt + 1) / 2
@@ -98,6 +120,7 @@ class LiNo_UniPS(pl.LightningModule):
             emap_to_save = emap_to_save / thresh
 
             plt.imsave(save_path + '/nml_predict.png', np.clip(nout_to_save, 0, 1))
+            save_normal_exr(save_path + '/nml_predict.exr', nout)
             plt.imsave(save_path + '/nml_gt.png', np.clip(nml_gt_to_save, 0, 1))
             plt.imsave(save_path + '/error_map.png', emap_to_save, cmap='jet')
             torchvision.utils.save_image(img.squeeze(0).permute(3,0,1,2), save_path + '/tiled.png')
@@ -128,6 +151,7 @@ class LiNo_UniPS(pl.LightningModule):
                 normal_map = nout
                 savemat(mat_save_path + "/" + obj_name + '.mat',  {'Normal_est': normal_map})
             torchvision.utils.save_image(img.squeeze(0).permute(3,0,1,2), save_path + '/tiled.png')
+            save_normal_exr(save_path + '/nml_predict.exr', nout)
             nout = (nout + 1) / 2 
             plt.imsave(save_path + '/nml_predict.png', nout)
 

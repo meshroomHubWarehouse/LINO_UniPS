@@ -119,13 +119,19 @@ class DemoData(Dataset):
     
 class TestData(Dataset):
     def __init__(
-            self, 
-            data_root: list = None, 
-            numofimages: int = 16
-          
+            self,
+            data_root: list = None,
+            numofimages: int = 16,
+            image_select: str = "sorted",
         ):
-        self.data_root = data_root 
+        self.data_root = data_root
         self.numberOfImages = numofimages
+        # 'sorted' (defaut) : les N premieres images dans l'ordre lexicographique
+        #                     -> DETERMINISTE, budget de lumieres reproductible.
+        # 'random'          : comportement historique (np.random.permutation).
+        # Un fichier 'image_list.txt' dans le repertoire objet est prioritaire :
+        # il liste explicitement les images a consommer.
+        self.image_select = image_select
         self.objlist = []
         if isinstance(self.data_root, str):
             self.data_root = [self.data_root]
@@ -138,6 +144,37 @@ class TestData(Dataset):
         indices = list(range(total))
         self.objlist = [objlist[i] for i in indices]
         print(f"Test, => {len(self.objlist)} items selected.")
+
+    def select_indices(self, obj_path, directlist):
+        """Indices ORDONNES des images a charger. image_list.txt > image_select.
+
+        Sans cela, le sous-ensemble etait tire au hasard : impossible de savoir
+        ni de choisir quelles lumieres sont consommees, donc impossible de
+        declarer un budget de lumieres reproductible.
+        """
+        listfile = os.path.join(obj_path, "image_list.txt")
+        names = [os.path.basename(p) for p in directlist]
+        if os.path.isfile(listfile):
+            wanted = []
+            with open(listfile) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        wanted.append(os.path.basename(line))
+            missing = [w for w in wanted if w not in names]
+            if missing:
+                raise FileNotFoundError(
+                    f"image_list.txt reference des images absentes de {obj_path}: {missing[:5]}")
+            print(f"[TestData] selection image_list.txt : {len(wanted)} images (deterministe)")
+            return [names.index(w) for w in wanted]
+
+        n = len(directlist) if self.numberOfImages is None \
+            else min(self.numberOfImages, len(directlist))
+        if self.image_select == "random":
+            print(f"[TestData] selection aleatoire : {n}/{len(directlist)} images")
+            return list(np.random.permutation(len(directlist))[:n])
+        print(f"[TestData] selection triee : {n}/{len(directlist)} images (deterministe)")
+        return list(range(n))
 
     def load(self, objlist, dirid):
         obj_path = objlist[dirid]
@@ -172,12 +209,9 @@ class TestData(Dataset):
             return 0
 
        
-        num_images_to_sample = self.numberOfImages 
-        if num_images_to_sample is not None and num_images_to_sample < len(directlist):
-            indexset = np.random.permutation(len(directlist))[:num_images_to_sample]
-        else:
-            indexset = range(len(directlist))
-        
+        indexset = self.select_indices(obj_path, directlist)
+        self.used_images = [os.path.basename(directlist[i]) for i in indexset]
+
         I = None
         mask = None
         N = None

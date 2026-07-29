@@ -22,8 +22,8 @@ def lino_unips(pretrained=True, task_name="DiLiGenT", ckpt_path: Optional[str] =
             
     return model
 
-def load_test_data(data_root: list, numofimages: int):
-    return TestData(data_root,numofimages)
+def load_test_data(data_root: list, numofimages: int, image_select: str = "sorted"):
+    return TestData(data_root, numofimages, image_select=image_select)
 
 def load_data(input_imgs_list, input_mask):
     return DemoData(input_imgs_list,input_mask)

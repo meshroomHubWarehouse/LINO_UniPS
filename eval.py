@@ -34,6 +34,21 @@ if __name__ == "__main__":
         type=int, 
         default=42,
     )
+    parser.add_argument(
+        "--image_select",
+        type=str,
+        default="sorted",
+        choices=["sorted", "random"],
+        help="selection du sous-ensemble d'images : 'sorted' = les N premieres dans "
+             "l'ordre des noms (DETERMINISTE, defaut) ; 'random' = comportement "
+             "historique. Un fichier image_list.txt dans le repertoire objet est prioritaire.",
+    )
+    parser.add_argument(
+        "--ckpt_path",
+        type=str,
+        default=None,
+        help="chemin d'un lino.pth local (sinon LINO_MODEL_URL).",
+    )
 
     
     args = parser.parse_args()
@@ -45,7 +60,7 @@ if __name__ == "__main__":
     #         task_name=args.task_name
     #     )
     from hubconf import lino_unips  # Adjust import path
-    lino = lino_unips(pretrained=True, task_name=args.task_name)
+    lino = lino_unips(pretrained=True, task_name=args.task_name, ckpt_path=args.ckpt_path)
 
     # testdata = torch.hub.load(
     #         "houyuanchen111/LINO_UniPS",
@@ -55,5 +70,6 @@ if __name__ == "__main__":
     #         force_reload=True
     #     )
     from hubconf import load_test_data  # Adjust import path
-    testdata = load_test_data(data_root=[args.data_root], numofimages=args.num_images)
+    testdata = load_test_data(data_root=[args.data_root], numofimages=args.num_images,
+                              image_select=args.image_select)
     predict_normal()
