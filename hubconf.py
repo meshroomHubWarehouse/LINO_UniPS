@@ -73,10 +73,14 @@ class Predictor:
         demodata = load_data(input_imgs_list, input_mask)
         data = demodata[0]
         for key in data:
+            # Only floating-point data is cast to the inference dtype: integer data (e.g. the crop box "roi")
+            # must stay exact, bf16 would round it (1595 -> 1592) and shift the predicted normals.
             if isinstance(data[key], np.ndarray):
-                data[key] = torch.tensor(data[key], device=self.device, dtype=self.dtype)[None, ...]  # Add None to keep the batch dimension
+                dtype = self.dtype if np.issubdtype(data[key].dtype, np.floating) else torch.long
+                data[key] = torch.tensor(data[key], device=self.device, dtype=dtype)[None, ...]  # Add None to keep the batch dimension
             elif isinstance(data[key], torch.Tensor):
-                data[key] = data[key].to(self.device, dtype=self.dtype)[None, ...]
+                dtype = self.dtype if torch.is_floating_point(data[key]) else torch.long
+                data[key] = data[key].to(self.device, dtype=dtype)[None, ...]
             elif data[key] is None:
                 data[key] = None
             else:
