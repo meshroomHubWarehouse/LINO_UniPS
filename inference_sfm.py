@@ -295,26 +295,33 @@ def run_sfm_inference(sfm_path, output_folder, mask_folder=None,
                     mask_img = mask_img.resize(
                         (img_w, img_h), Image.NEAREST)
 
-            # LINO's network crops inputs to dimensions divisible by 32 internally,
-            # but applies the mask at the uncropped size -> broadcast mismatch.
-            # Pre-crop images AND mask to floor(dim/32)*32 BEFORE saving the mask, so the
-            # normals AND the saved mask (used downstream by RNbNeuS2) stay the same size.
+            # The network requires H,W divisible by 32. We crop the inputs
+            # (top-left) only for inference, but keep the ORIGINAL image size
+            # for the saved normal map AND mask: cropping the output would make
+            # it smaller than the SfM intrinsics describe (shifting the
+            # principal point in downstream RNbNeuS2). The predicted normal is
+            # padded back to the original size after prediction (below).
+            orig_h = orig_w = None
+            mask_img_full = mask_img  # original-size mask (for saving)
             if imgs_list:
-                ih, iw = imgs_list[0][0].shape[:2]
-                H32, W32 = (ih // 32) * 32, (iw // 32) * 32
-                if (H32, W32) != (ih, iw):
+                orig_h, orig_w = imgs_list[0][0].shape[:2]
+                H32, W32 = (orig_h // 32) * 32, (orig_w // 32) * 32
+                if (H32, W32) != (orig_h, orig_w):
                     imgs_list = [(im[:H32, :W32], n) for (im, n) in imgs_list]
                     if mask_img is not None:
                         mw, mh = mask_img.size
-                        if (mh, mw) != (ih, iw):
-                            mask_img = mask_img.resize((iw, ih), Image.NEAREST)
-                        mask_img = mask_img.crop((0, 0, W32, H32))
+                        if (mh, mw) != (orig_h, orig_w):
+                            mask_img_full = mask_img.resize(
+                                (orig_w, orig_h), Image.NEAREST)
+                        # cropped copy fed to the network only
+                        mask_img = mask_img_full.crop((0, 0, W32, H32))
 
-            # Save extracted mask at output resolution (after /32 crop)
-            if mask_img is not None and mask_output_folder and not mask_folder:
+            # Save extracted mask at ORIGINAL (uncropped) resolution so it
+            # matches the padded-back normal map and the SfM intrinsics.
+            if mask_img_full is not None and mask_output_folder and not mask_folder:
                 os.makedirs(mask_output_folder, exist_ok=True)
                 mask_path = os.path.join(mask_output_folder, f"{pose_id}.png")
-                mask_img.save(mask_path)
+                mask_img_full.save(mask_path)
                 logger.info("Saved mask to %s", mask_path)
 
             # Run prediction via the Predictor API
@@ -331,6 +338,19 @@ def run_sfm_inference(sfm_path, output_folder, mask_folder=None,
                 normal = normal.squeeze(0)
             if normal.shape[0] == 3 and normal.ndim == 3:
                 normal = np.transpose(normal, (1, 2, 0))
+
+            # Pad the normal back to the ORIGINAL (pre-/32-crop) size so the
+            # output dimensions match the input images and the SfM intrinsics
+            # exactly. The padded border (bottom/right) is background and is
+            # zeroed out by the mask downstream.
+            if orig_h is not None and (normal.shape[0] != orig_h
+                                       or normal.shape[1] != orig_w):
+                pad_h = orig_h - normal.shape[0]
+                pad_w = orig_w - normal.shape[1]
+                if pad_h >= 0 and pad_w >= 0:
+                    normal = np.pad(
+                        normal, ((0, pad_h), (0, pad_w), (0, 0)),
+                        mode="constant")
 
             # Save output
             ext = ".exr" if output_format == "exr" else ".png"
