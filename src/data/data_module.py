@@ -70,9 +70,12 @@ def crop_and_resize_mask(mask, roi, max_image_resolution=6000):
     return mask
 
 class DemoData(Dataset):
-    def __init__(self,input_imgs_list,input_mask):
+    def __init__(self,input_imgs_list,input_mask, margin=8, max_image_resolution=6000):
          self.input_imgs_list = input_imgs_list
          self.input_mask = input_mask
+         # crop margin around the mask (pixels) and maximum size of the square network input
+         self.margin = margin
+         self.max_image_resolution = max_image_resolution
     def __len__(self):
         return 1
     def load(self,input_images_list,mask):
@@ -85,13 +88,13 @@ class DemoData(Dataset):
             self.mask_original = mask[:,:,None]
         else:
             self.mask_original = mask[:,:,None] / 255.0
-        self.roi = get_roi(mask)
+        self.roi = get_roi(mask, self.margin)
         for i in range(len(input_images_list)):
             img = input_images_list[i]
-            input_images_list[i]= crop_and_resize_img(img[0], self.roi)
+            input_images_list[i]= crop_and_resize_img(img[0], self.roi, self.max_image_resolution)
         I = np.array(input_images_list)
         numberofimages,h,w,_ = I.shape
-        mask = crop_and_resize_mask(mask, self.roi)
+        mask = crop_and_resize_mask(mask, self.roi, self.max_image_resolution)
         I = np.reshape(I, (-1, h * w, 3))
         temp = np.mean(I[:, mask.flatten()==1,:], axis=2)
         mx = np.max(temp, axis=1)
