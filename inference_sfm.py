@@ -109,16 +109,20 @@ def _extract_interior_mask(mask_uint8):
 
 
 def extract_alpha_mask(views):
-    """Extract mask by ANDing all alpha channels from the pose's images.
+    """Extract the pose mask by a strict majority vote over the alpha channels
+    of the pose's images.
 
     Images with all-white alpha are skipped.  For each image, border-connected
     white regions (undistortion validity) are removed, keeping only interior
-    object regions.
+    object regions.  A pixel belongs to the pose mask when it is inside more
+    than half of the remaining per-image masks: an intersection (AND) would be
+    eroded by a single partial mask (e.g. a segmentation failing on a dark,
+    grazing-light image).
 
     Returns a PIL Image (RGB) or None.
     """
     import numpy as np
-    combined = None
+    votes = None
     count = 0
     for v in views:
         path = v.get("path", "")
@@ -138,14 +142,15 @@ def extract_alpha_mask(views):
             logger.info("Skipping alpha from %s: no interior object mask",
                         os.path.basename(path))
             continue
-        if combined is None:
-            combined = cleaned
+        if votes is None:
+            votes = cleaned.astype(np.uint16)
         else:
-            combined = combined * cleaned  # logical AND
+            votes += cleaned
         count += 1
-    if combined is None:
+    if votes is None:
         return None
-    logger.info("Extracted alpha mask from %d images (AND)", count)
+    combined = (2 * votes > count).astype(np.uint8)  # strict majority
+    logger.info("Extracted alpha mask from %d images (majority vote)", count)
     combined_255 = (combined * 255).astype(np.uint8)
     mask_pil = Image.fromarray(combined_255)
     return Image.merge("RGB", (mask_pil, mask_pil, mask_pil))
