@@ -19,7 +19,8 @@ dependencies = [
     "scipy",
     "matplotlib",
     "numpy",
-    "opencv-python-headless",
+    # OpenCV 5 wheels are built without OpenEXR: the EXR normal maps need OpenCV 4
+    "opencv-python-headless<5",
     "Pillow",
     "scikit-image",
     "scikit-learn",
