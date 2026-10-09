@@ -39,4 +39,4 @@ include = ["src*"]
 
 [tool.setuptools]
 zip-safe = false
-py-modules = ["inference_sfm", "hubconf"]
+py-modules = ["inference_sfm", "hubconf", "meshroom_predict"]

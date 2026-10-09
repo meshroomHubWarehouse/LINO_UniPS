@@ -158,7 +158,9 @@ class LiNo_UniPS(pl.LightningModule):
         c_s = roi[4]
         c_e = roi[5]
         nml_predict = nml_predict.squeeze().permute(1,2,0).float().cpu().numpy()
-        nml_predict = cv2.resize(nml_predict, dsize=(c_e-c_s, r_e-r_s), interpolation=cv2.INTER_AREA)
+        # resampling of the square prediction to the crop size (INTER_AREA by default, as in the original code)
+        interpolation = getattr(self, "output_interpolation", cv2.INTER_AREA)
+        nml_predict = cv2.resize(nml_predict, dsize=(c_e-c_s, r_e-r_s), interpolation=interpolation)
         nml_predict = np.divide(nml_predict, np.linalg.norm(nml_predict, axis=2, keepdims=True) + 1.0e-12)
         mask = np.float32(np.abs(1 - np.sqrt(np.sum(nml_predict * nml_predict, axis=2))) < 0.5)
         nml_predict = nml_predict * mask[:, :, np.newaxis] 

@@ -28,8 +28,8 @@ def lino_unips(pretrained=True, task_name="DiLiGenT", **kwargs):
 def load_test_data(data_root: list, numofimages: int):
     return TestData(data_root,numofimages)
 
-def load_data(input_imgs_list, input_mask):
-    return DemoData(input_imgs_list,input_mask)
+def load_data(input_imgs_list, input_mask, **data_options):
+    return DemoData(input_imgs_list,input_mask, **data_options)
 
 def LINO(local_file_path: Optional[str] = None,task_name="DiLiGenT", **kwargs):
     """
@@ -62,21 +62,29 @@ def _load_state_dict(local_file_path: Optional[str] = None):
 
 
 class Predictor:
-    def __init__(self, model):
+    def __init__(self, model, device=None):
         self.model = model
-        self.device = torch.device('cuda')
-        self.dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+        # GPU by default (bf16 on compute capability >= 8, fp16 otherwise), float32 on CPU
+        self.device = torch.device(device) if device else torch.device('cuda')
+        if self.device.type == 'cuda':
+            self.dtype = torch.bfloat16 if torch.cuda.get_device_capability(self.device)[0] >= 8 else torch.float16
+        else:
+            self.dtype = torch.float32
 
         self.model.to(self.device, dtype=self.dtype)
     
-    def predict(self, input_imgs_list, input_mask):
-        demodata = load_data(input_imgs_list, input_mask)
+    def predict(self, input_imgs_list, input_mask, **data_options):
+        demodata = load_data(input_imgs_list, input_mask, **data_options)
         data = demodata[0]
         for key in data:
+            # Only floating-point data is cast to the inference dtype: integer data (e.g. the crop box "roi")
+            # must stay exact, bf16 would round it (1595 -> 1592) and shift the predicted normals.
             if isinstance(data[key], np.ndarray):
-                data[key] = torch.tensor(data[key], device=self.device, dtype=self.dtype)[None, ...]  # Add None to keep the batch dimension
+                dtype = self.dtype if np.issubdtype(data[key].dtype, np.floating) else torch.long
+                data[key] = torch.tensor(data[key], device=self.device, dtype=dtype)[None, ...]  # Add None to keep the batch dimension
             elif isinstance(data[key], torch.Tensor):
-                data[key] = data[key].to(self.device, dtype=self.dtype)[None, ...]
+                dtype = self.dtype if torch.is_floating_point(data[key]) else torch.long
+                data[key] = data[key].to(self.device, dtype=dtype)[None, ...]
             elif data[key] is None:
                 data[key] = None
             else:
