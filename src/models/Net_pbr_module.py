@@ -336,25 +336,44 @@ class LiNo_UniPS(pl.LightningModule):
             self._save_test_results(nout, nml_gt, emap, img, loss, mae, directlist, self.run_save_dir, baseColor=bc_out, roughness=rough_out, metal=metal_out,mask_gt=mask_gt)
 
     def predict_step(self,batch):
-        roi = batch.get("roi",None)
-        nml_predict = self.model_step(batch)
-        roi = roi[0].int().cpu().numpy()
-        h_ = roi[0] 
-        w_ = roi[1] 
-        r_s = roi[2]
-        r_e = roi[3]
-        c_s = roi[4]
-        c_e = roi[5]
-        nml_predict = nml_predict.squeeze(0).permute(1,2,0).float().cpu().numpy()
-        nml_predict = cv2.resize(nml_predict, dsize=(c_e-c_s, r_e-r_s), interpolation=cv2.INTER_AREA)
-        nml_predict = np.divide(nml_predict, np.linalg.norm(nml_predict, axis=2, keepdims=True) + 1.0e-12)
-        mask = np.float32(np.abs(1 - np.sqrt(np.sum(nml_predict * nml_predict, axis=2))) < 0.5)
-        nml_predict = nml_predict * mask[:, :, np.newaxis] 
-        nout = np.zeros((h_, w_, 3), np.float32)
-        nout[r_s:r_e, c_s:c_e,:] = nml_predict
-        mask = batch["mask_original"].squeeze().float().cpu().numpy()[:,:,None]
+        """Normal and PBR maps of one sample at the input image size, zero outside the mask.
 
-        return nout*mask
+        Returns:
+            dict: "normal" (H x W x 3 unit normals), "baseColor" (H x W x 3), "roughness" and "metallic"
+            (H x W x 1), the BRDF maps in [0, 1].
+        """
+        roi = batch.get("roi",None)
+        nml_predict, baseColor_predict, roughness_predict, metal_predict = self.model_step(batch)
+        roi = roi[0].int().cpu().numpy()
+        h_, w_, r_s, r_e, c_s, c_e = roi
+        # resampling of the square prediction to the crop size (INTER_AREA by default, as in the normal model)
+        interpolation = getattr(self, "output_interpolation", cv2.INTER_AREA)
+
+        def to_image(prediction, postprocess):
+            # [1, C, S, S] prediction -> crop size -> image size (zero outside the crop)
+            values = prediction.squeeze(0).permute(1,2,0).float().cpu().numpy()
+            values = cv2.resize(values, dsize=(c_e-c_s, r_e-r_s), interpolation=interpolation)
+            values = postprocess(values.reshape(values.shape[0], values.shape[1], -1))
+            out = np.zeros((h_, w_, values.shape[2]), np.float32)
+            out[r_s:r_e, c_s:c_e,:] = values
+            return out
+
+        def normalize(nml):
+            nml = np.divide(nml, np.linalg.norm(nml, axis=2, keepdims=True) + 1.0e-12)
+            mask = np.float32(np.abs(1 - np.sqrt(np.sum(nml * nml, axis=2))) < 0.5)
+            return nml * mask[:, :, np.newaxis]
+
+        def to_unit_range(values):
+            # the BRDF heads predict values in [-1, 1] (see _postprocess_brdf_predictions)
+            return np.clip(values, -1.0, 1.0) * 0.5 + 0.5
+
+        mask = batch["mask_original"].squeeze().float().cpu().numpy()[:,:,None]
+        return {
+            "normal": to_image(nml_predict, normalize) * mask,
+            "baseColor": to_image(baseColor_predict, to_unit_range) * mask,
+            "roughness": to_image(roughness_predict, to_unit_range) * mask,
+            "metallic": to_image(metal_predict, to_unit_range) * mask,
+        }
     def model_step(self,batch):
         I = batch.get("imgs",None)
         M = batch.get("mask",None)
