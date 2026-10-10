@@ -2,12 +2,13 @@ from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 from pytorch_lightning import seed_everything 
 import argparse
+import os
 import torch
-
 def predict_normal():
     test_loader = DataLoader(testdata, batch_size=1)
     trainer = pl.Trainer(accelerator="auto", devices=1,precision="bf16-mixed")
     trainer.test(model=lino, dataloaders=test_loader)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -34,26 +35,30 @@ if __name__ == "__main__":
         type=int, 
         default=42,
     )
+    parser.add_argument(
+        "--ckpt_path",
+        type=str,
+        default=None,
+        help="Optional path to a local lino.pth checkpoint. If omitted, LINO_MODEL_URL/default URL is used.",
+    )
 
     
     args = parser.parse_args()
+    repo_dir = os.path.dirname(os.path.abspath(__file__))
     seed_everything(seed=args.seed, workers=True)
-    # lino = torch.hub.load(
-    #         "houyuanchen111/LINO_UniPS",
-    #         "lino_unips",
-    #         pretrained=True,
-    #         task_name=args.task_name
-    #     )
-    from hubconf import lino_unips  # Adjust import path
-    lino = lino_unips(pretrained=True, task_name=args.task_name)
-
-    # testdata = torch.hub.load(
-    #         "houyuanchen111/LINO_UniPS",
-    #         "load_test_data",
-    #         data_root=[args.data_root],
-    #         numofimages=args.num_images,
-    #         force_reload=True
-    #     )
-    from hubconf import load_test_data  # Adjust import path
-    testdata = load_test_data(data_root=[args.data_root], numofimages=args.num_images)
+    lino = torch.hub.load(
+            repo_dir,
+            "lino_unips",
+            source="local",
+            pretrained=True,
+            task_name=args.task_name,
+            ckpt_path=args.ckpt_path,
+        )
+    testdata = torch.hub.load(
+            repo_dir,
+            "load_test_data",
+            source="local",
+            data_root=[args.data_root],
+            numofimages=args.num_images
+        )
     predict_normal()
