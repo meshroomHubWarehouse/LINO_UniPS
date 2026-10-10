@@ -11,6 +11,11 @@ DEFAULT_MODEL_URL = os.getenv(
     "LINO_MODEL_URL",
     "https://huggingface.co/houyuanchen/lino/resolve/main/lino.pth",
 )
+# PBR model (normals + base color, roughness, metallic: src.models.LiNo_UniPS_PBR with brdf=True)
+DEFAULT_PBR_MODEL_URL = os.getenv(
+    "LINO_PBR_MODEL_URL",
+    "https://huggingface.co/houyuanchen/lino/resolve/main/lino_pbr.pth",
+)
 
 def lino_unips(pretrained=True, task_name="DiLiGenT", ckpt_path: Optional[str] = None, **kwargs):
     model = LiNo_UniPS(task_name=task_name, **kwargs)
@@ -46,16 +51,18 @@ def LINO(local_file_path: Optional[str] = None,task_name="DiLiGenT", **kwargs):
     return Predictor(model)
 
 
-def _load_state_dict(local_file_path: Optional[str] = None):
+def _load_state_dict(local_file_path: Optional[str] = None, url: Optional[str] = None):
+    """State dict from local_file_path if given, otherwise downloaded from url (DEFAULT_MODEL_URL by default)."""
+    url = DEFAULT_MODEL_URL if url is None else url
     if local_file_path is not None:
         if not os.path.exists(local_file_path):
             raise FileNotFoundError(f"Checkpoint file not found: {local_file_path}")
         # Load state_dict from local file
         state_dict = torch.load(local_file_path, weights_only=False, map_location=torch.device("cpu"))
     else:
-        if not DEFAULT_MODEL_URL:
+        if not url:
             raise ValueError("LINO_MODEL_URL environment variable is not set; please provide a local_file_path or set LINO_MODEL_URL.")
-        state_dict = torch.hub.load_state_dict_from_url(DEFAULT_MODEL_URL, progress=True, map_location=torch.device("cpu"))
+        state_dict = torch.hub.load_state_dict_from_url(url, progress=True, map_location=torch.device("cpu"))
 
     return state_dict.get("state_dict", state_dict) if isinstance(state_dict, dict) else state_dict
 
