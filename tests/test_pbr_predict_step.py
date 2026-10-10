@@ -61,3 +61,21 @@ def test_pbr_predict_step_keeps_values_outside_the_crop_zero(stubPbrNetwork):
     for values in maps.values():
         assert not values[~crop].any()
         assert np.abs(values[crop]).sum(axis=-1).all()
+
+
+def test_pbr_model_step_runs_in_bf16():
+    """The Predictor runs the network in bf16 (GPUs of compute capability >= 8 and CPU): the head outputs, cast to
+    float32 by model_step, must be stored in its bf16 output buffers ("Index put requires the source and destination
+    dtypes match"). Untrained network, 2 images, a few masked pixels: only the dtypes and shapes are checked
+    (about 1 min on the CPU: the image encoder runs on a whole 512 x 512 tile)."""
+    torch.manual_seed(0)
+    network = LiNo_UniPS_PBR(task_name="Real", brdf=True).eval().to(torch.bfloat16)
+    images = torch.rand(1, 3, 512, 512, 2).to(torch.bfloat16)
+    mask = torch.zeros(1, 1, 512, 512, dtype=torch.bfloat16)
+    mask[..., 250:254, 250:254] = 1
+    with torch.no_grad():
+        normal, baseColor, roughness, metallic = network.model_step({"imgs": images, "mask": mask})
+    assert normal.shape == baseColor.shape == (1, 3, 512, 512)
+    assert roughness.shape == metallic.shape == (1, 1, 512, 512)
+    inside = mask[0, 0] > 0
+    assert torch.isfinite(baseColor[0][:, inside].float()).all() and normal[0][:, inside].abs().sum() > 0

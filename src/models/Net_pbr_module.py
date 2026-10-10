@@ -460,10 +460,11 @@ class LiNo_UniPS(pl.LightningModule):
                     metal_predict = result_dict['metallic'].float()
                     conf_predict = result_dict['conf'].float()
                     normal_predict = F.normalize(normal_predict, p=2, dim=-1)
-                    normal_out[b, ids, :] = normal_predict[b,:,:]
-                    baseColor_out[b, ids, :] = baseColor_predict[b,:,:]
-                    roughness_out[b, ids, :] = roughness_predict[b,:,:]
-                    metal_out[b, ids, :] = metal_predict[b,:,:]
+                    # back from float32 to the dtype of the output buffers (bf16 with the Predictor)
+                    normal_out[b, ids, :] = normal_predict[b,:,:].to(normal_out.dtype)
+                    baseColor_out[b, ids, :] = baseColor_predict[b,:,:].to(baseColor_out.dtype)
+                    roughness_out[b, ids, :] = roughness_predict[b,:,:].to(roughness_out.dtype)
+                    metal_out[b, ids, :] = metal_predict[b,:,:].to(metal_out.dtype)
                     conf_out[b, ids, :] = conf_predict[b,:,:].to(I.dtype)
                 normal_out = normal_out.reshape(B,H,W,3).permute(0,3,1,2)
                 conf_out = conf_out.reshape(B,H,W,1).permute(0,3,1,2)
