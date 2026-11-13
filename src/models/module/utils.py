@@ -158,7 +158,7 @@ class FeatureFusionBlock(nn.Module):
         else:
             modifier = {"size": size}
 
-        output = custom_interpolate(output.float(), **modifier, mode="bilinear", align_corners=self.align_corners).to(torch.bfloat16)
+        output = custom_interpolate(output.float(), **modifier, mode="bilinear", align_corners=self.align_corners).to(next(self.parameters()).dtype)
         output = self.out_conv(output)
 
         return output
@@ -461,13 +461,13 @@ class ImageFeatureFusion(nn.Module):
             x = self.pixel_shuffle(x) # [B, C, H, W] -> [B, C/4, H*2, W*2]
             
             x = self.projects[layer](x)
-            x = self._apply_pos_embed(x, 256, 256).to(torch.bfloat16)
+            x = self._apply_pos_embed(x, 256, 256).to(next(self.parameters()).dtype)
             x = self.resize_layers[layer](x)
             
             out.append(x)
         
         out = self.scratch_forward(out)
-        out = self._apply_pos_embed(out, 256, 256).to(torch.bfloat16) # [B, 256, 64, 64]
+        out = self._apply_pos_embed(out, 256, 256).to(next(self.parameters()).dtype) # [B, 256, 64, 64]
         
         return out
         
@@ -487,11 +487,11 @@ class ScaleInvariantSpatialLightImageEncoder(nn.Module):
         B = N//nImgArray[0]   
         mosaic_scale = H // canonical_resolution
         K = mosaic_scale * mosaic_scale
-        self.wt_filter = self.wt_filter.to(x.device)
-        self.iwt_filter = self.iwt_filter.to(x.device)
+        self.wt_filter = self.wt_filter.to(x.device, next(self.parameters()).dtype)
+        self.iwt_filter = self.iwt_filter.to(x.device, next(self.parameters()).dtype)
 
         """ (1a) resizing x to (Hc, Wc)"""
-        x_resized = F.interpolate(x.float(), size= (canonical_resolution, canonical_resolution), mode='bilinear', align_corners=True).to(torch.bfloat16) 
+        x_resized = F.interpolate(x.float(), size= (canonical_resolution, canonical_resolution), mode='bilinear', align_corners=True).to(next(self.parameters()).dtype) 
         x_resized = x_resized.view(len(nImgArray), int(nImgArray[0]), C, x_resized.shape[2], x_resized.shape[3]) 
         
         
@@ -506,7 +506,7 @@ class ScaleInvariantSpatialLightImageEncoder(nn.Module):
         light_tokens_resized = aggregated_tokens_list[:,:,:patch_start_idx - 4,:] 
         light_tokens_resized = rearrange(light_tokens_resized,'(B f) layer num c -> B f layer num c',B = B) 
         x = self.fusion(aggregated_tokens_list[:,:,patch_start_idx:,:], nImgArray)
-        f_resized_grid = F.interpolate(x.reshape(N, self.feat_dim, canonical_resolution, canonical_resolution).float() , size= (H, W), mode='bilinear', align_corners=True).to(torch.bfloat16) 
+        f_resized_grid = F.interpolate(x.reshape(N, self.feat_dim, canonical_resolution, canonical_resolution).float() , size= (H, W), mode='bilinear', align_corners=True).to(next(self.parameters()).dtype) 
         
         """ (2b) feature extraction (grid) """
 

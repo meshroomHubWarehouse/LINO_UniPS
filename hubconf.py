@@ -71,7 +71,7 @@ class Predictor:
     def __init__(self, model, device=None):
         self.model = model
         # GPU by default (bf16 on compute capability >= 8, fp16 otherwise), bf16 on CPU: the network casts
-        # its intermediate tensors to bf16 (e.g. the wavelet filters), float32 weights would not match them
+        # its intermediate tensors to the dtype of its weights (e.g. the wavelet filters)
         self.device = torch.device(device) if device else torch.device('cuda')
         if self.device.type == 'cuda':
             self.dtype = torch.bfloat16 if torch.cuda.get_device_capability(self.device)[0] >= 8 else torch.float16
