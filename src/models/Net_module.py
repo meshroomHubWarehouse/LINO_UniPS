@@ -43,10 +43,10 @@ class LiNo_UniPS(pl.LightningModule):
         pretrain_weight = torch.load(pth_path,weights_only=False)
         self.load_state_dict(pretrain_weight, strict=False)
     def _prepare_test_inputs(self, batch):
-        img = batch["imgs"].to(torch.bfloat16)
+        img = batch["imgs"].to(self.dtype)
         self.numberofImages = img.shape[-1]
         print("number of test images", self.numberofImages)
-        nml = batch["nml"].to(torch.bfloat16)
+        nml = batch["nml"].to(self.dtype)
         directlist = batch["directlist"]
         roi = batch.get("roi",None)
         roi = roi[0].cpu().numpy()
@@ -208,8 +208,8 @@ class LiNo_UniPS(pl.LightningModule):
             img = I.permute(0, 4, 1, 2, 3)            
             """ Sample Decoder at Original Resokution"""
             img = img.squeeze()
-            I_dec = F.interpolate(img.float(), size=(decoder_resolution, decoder_resolution), mode='bilinear', align_corners=False).to(torch.bfloat16) 
-            M_dec = F.interpolate(M.float(), size=(decoder_resolution, decoder_resolution), mode='nearest').to(torch.bfloat16)
+            I_dec = F.interpolate(img.float(), size=(decoder_resolution, decoder_resolution), mode='bilinear', align_corners=False).to(self.dtype) 
+            M_dec = F.interpolate(M.float(), size=(decoder_resolution, decoder_resolution), mode='nearest').to(self.dtype)
             decoder_imgsize = (decoder_resolution, decoder_resolution)
             C = img.shape[1]
             H = decoder_imgsize[0]
